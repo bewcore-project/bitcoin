@@ -190,6 +190,8 @@ class CWalletScanState {
 public:
     unsigned int nKeys{0};
     unsigned int nCKeys{0};
+    unsigned int nPQKeys{0};
+    unsigned int nPQCKeys{0};
     unsigned int nWatchKeys{0};
     unsigned int nKeyMeta{0};
     unsigned int m_unknown_records{0};
@@ -348,6 +350,58 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
             if (pwallet->nMasterKeyMaxID < nID)
                 pwallet->nMasterKeyMaxID = nID;
         }
+        else if (strType == "pqkey")
+        {
+            PQCPubKey vchPubKey;
+            ssKey >> vchPubKey;
+            if (!vchPubKey.IsValid())
+            {
+                strErr = "Error reading wallet database: PQCPubKey corrupt";
+                return false;
+            }
+            PQCPrivKey pkey;
+            uint256 hash;
+        
+            wss.nPQKeys++;
+            ssValue >> pkey;
+        
+            // Чтение хэша, если он присутствует
+            try
+            {
+                ssValue >> hash;
+            }
+            catch (...) {}
+        
+            bool fSkipCheck = false;
+        
+            if (!hash.IsNull())
+            {
+                std::vector<unsigned char> vchKey;
+                vchKey.reserve(vchPubKey.size() + pkey.size());
+                vchKey.insert(vchKey.end(), vchPubKey.begin(), vchPubKey.end());
+                vchKey.insert(vchKey.end(), pkey.begin(), pkey.end());
+        
+                if (Hash(vchKey.begin(), vchKey.end()) != hash)
+                {
+                    strErr = "Error reading wallet database: PQCPubKey/PQCPrivKey corrupt";
+                    return false;
+                }
+        
+                fSkipCheck = true;
+            }
+        
+            PQCKey key;
+            if (!key.Load(pkey, vchPubKey, fSkipCheck))
+            {
+                strErr = "Error reading wallet database: PQCPrivKey corrupt";
+                return false;
+            }
+            if (!pwallet->LoadPQCKey(key, vchPubKey))
+            {
+                strErr = "Error reading wallet database: LoadPQCKey failed";
+                return false;
+            }
+        }
         else if (strType == "ckey")
         {
             CPubKey vchPubKey;
@@ -364,6 +418,26 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
             if (!pwallet->LoadCryptedKey(vchPubKey, vchPrivKey))
             {
                 strErr = "Error reading wallet database: LoadCryptedKey failed";
+                return false;
+            }
+            wss.fIsEncrypted = true;
+        }
+        else if (strType == "pqckey")
+        {
+            PQCPubKey vchPubKey;
+            ssKey >> vchPubKey;
+            if (!vchPubKey.IsValid())
+            {
+                strErr = "Error reading wallet database: PQCPubKey corrupt";
+                return false;
+            }
+            std::vector<unsigned char> vchPrivKey;
+            ssValue >> vchPrivKey;
+            wss.nPQCKeys++;
+        
+            if (!pwallet->LoadCryptedPQKey(vchPubKey, vchPrivKey))
+            {
+                strErr = "Error reading wallet database: LoadCryptedPQKey failed";
                 return false;
             }
             wss.fIsEncrypted = true;
@@ -462,7 +536,8 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
 bool WalletBatch::IsKeyType(const std::string& strType)
 {
     return (strType== "key" || strType == "wkey" ||
-            strType == "mkey" || strType == "ckey");
+            strType == "mkey" || strType == "ckey" ||
+            strType == "pqkey" || strType == "pqckey");
 }
 
 DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
@@ -545,10 +620,10 @@ DBErrors WalletBatch::LoadWallet(CWallet* pwallet)
     pwallet->WalletLogPrintf("nFileVersion = %d\n", wss.nFileVersion);
 
     pwallet->WalletLogPrintf("Keys: %u plaintext, %u encrypted, %u w/ metadata, %u total. Unknown wallet records: %u\n",
-           wss.nKeys, wss.nCKeys, wss.nKeyMeta, wss.nKeys + wss.nCKeys, wss.m_unknown_records);
+           wss.nKeys, wss.nCKeys, wss.nPQKeys, wss.nPQCKeys, wss.nKeyMeta, wss.nKeys + wss.nCKeys + wss.nPQKeys + wss.nPQCKeys, wss.m_unknown_records);
 
     // nTimeFirstKey is only reliable if all keys have metadata
-    if ((wss.nKeys + wss.nCKeys + wss.nWatchKeys) != wss.nKeyMeta)
+    if ((wss.nKeys + wss.nCKeys + wss.nPQKeys + wss.nPQCKeys + wss.nWatchKeys) != wss.nKeyMeta)
         pwallet->UpdateTimeFirstKey(1);
 
     for (const uint256& hash : wss.vWalletUpgrade)
