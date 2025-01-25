@@ -56,6 +56,22 @@ public:
         return bech32::Encode(m_params.Bech32HRP(), data);
     }
 
+    std::string operator()(const WitnessV3KeyHash& id) const
+    {
+        std::vector<unsigned char> data = {0};
+        data.reserve(33);
+        ConvertBits<8, 5, true>([&](unsigned char c) { data.push_back(c); }, id.begin(), id.end());
+        return bech32::Encode(m_params.Bech32HRP(), data);
+    }
+
+    std::string operator()(const WitnessV3ScriptHash& id) const
+    {
+        std::vector<unsigned char> data = {0};
+        data.reserve(53);
+        ConvertBits<8, 5, true>([&](unsigned char c) { data.push_back(c); }, id.begin(), id.end());
+        return bech32::Encode(m_params.Bech32HRP(), data);
+    }
+
     std::string operator()(const WitnessUnknown& id) const
     {
         if (id.version < 1 || id.version > 16 || id.length < 2 || id.length > 40) {
@@ -116,6 +132,23 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
                 }
                 return CNoDestination();
             }
+            if (version == 3) {
+                {
+                    WitnessV3KeyHash keyid;
+                    if (data.size() == keyid.size()) {
+                        std::copy(data.begin(), data.end(), keyid.begin());
+                        return keyid;
+                    }
+                }
+                {
+                    WitnessV3ScriptHash scriptid;
+                    if (data.size() == scriptid.size()) {
+                        std::copy(data.begin(), data.end(), scriptid.begin());
+                        return scriptid;
+                    }
+                }
+                return CNoDestination();
+            }
             if (version > 16 || data.size() < 2 || data.size() > 40) {
                 return CNoDestination();
             }
@@ -129,6 +162,37 @@ CTxDestination DecodeDestination(const std::string& str, const CChainParams& par
     return CNoDestination();
 }
 } // namespace
+
+PQCKey PQDecodeSecret(const std::string& str)
+{
+    PQCKey key;
+    std::vector<unsigned char> data;
+    if (DecodeBase58Check(str, data)) {
+        const std::vector<unsigned char>& privkey_prefix = Params().Base58Prefix(CChainParams::PQ_SECRET_KEY);
+        key.Set(data.begin() + privkey_prefix.size(), data.begin() + privkey_prefix.size() + 1281, true);
+        unsigned char* pch = (unsigned char *)(key.pkbegin());
+        unsigned char* pk = (unsigned char *)&((data.begin())[0]);
+        memcpy(pch,pk + privkey_prefix.size() + 1281 + 1,key.pksize());
+    }
+    if (!data.empty()) {
+        memory_cleanse(data.data(), data.size());
+    }
+    return key;
+}
+
+std::string PQEncodeSecret(const PQCKey& key)
+{
+    assert(key.IsValid());
+    std::vector<unsigned char> data = Params().Base58Prefix(CChainParams::PQ_SECRET_KEY);
+    data.insert(data.end(), key.pkbegin(), key.pkend());
+    if (key.IsCompressed()) {
+        data.push_back(1);
+    }
+
+    std::string ret = EncodeBase58Check(data);
+    memory_cleanse(data.data(), data.size());
+    return ret;
+}
 
 CKey DecodeSecret(const std::string& str)
 {

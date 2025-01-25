@@ -8,13 +8,18 @@
 
 #include <chainparams.h>
 #include <key.h>
+#include <pqkey.h>
 #include <pubkey.h>
+#include <pqpubkey.h>
 #include <script/standard.h>
 
 #include <string>
 
 CKey DecodeSecret(const std::string& str);
 std::string EncodeSecret(const CKey& key);
+
+PQCKey DecodeSecret(const std::string& str);
+std::string EncodeSecret(const PQCKey& key);
 
 CExtKey DecodeExtKey(const std::string& str);
 std::string EncodeExtKey(const CExtKey& extkey);
