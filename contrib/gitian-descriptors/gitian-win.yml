@@ -23,7 +23,7 @@ packages:
 - "python"
 - "rename"
 remotes:
-- "url": "https://github.com/bitcoin/bitcoin.git"
+- "url": "https://github.com/bewcore-project/bitcoin.git"
   "dir": "bitcoin"
 files: []
 script: |
